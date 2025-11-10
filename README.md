@@ -1,12 +1,16 @@
 # MAPOR2025
 For this year's Midwest Association of Public Opinion Research, I am examining the effects of neighborhood-level environmental factors on individual well-being. Three predictor variables I use are land cover, Walkscore, and recreational facility count. 
 
-This folder contains Python scripts that calculate forest(greenness) and developed open space percentage using National Land Cover Data (NLCD). The code processes addresses by drawing a rough one-mile buffer around each individual's residential address, and calculating the percentage of forest/developed open space using the class number assigned by offcial NLCD site. 
+I am interested in 1) the distibution of certain health conditions among the group, 2) examining the effects on environmental factors on the heal outcomes, 3) examining the differential effects brought by individual-level environment and census tract-level environment.
 
-The health data and individual information come from a previously completed health study focusing on Korean American adults (n=772). Responses were self-reported. Survey questions were drawn from American Community Survey and California Health Interview Survey.  
+# Data
+The health data and individual information come from the Health and Well-being of Koreans, a previously completed health study focusing on Korean American adults (n=772). Respondents were recruited using Respondent-Driven Sampling methods as each seed respondent was requested to recruite another three potential participants. Responses were self-reported through a web-survey. Survey questions were drawn from American Community Survey and California Health Interview Survey, including chronic disease condition, loneliness, psychological distress, etc.  
 
 # Rmd File
 The R script contains the complete process of data analysis (e.g., data cleaning, recoding, exploratory analysis,visualizations, model fitting, and model selection). 
+
+# What's in this folder
+This folder contains Python scripts that calculate forest(greenness) and developed open space percentage using National Land Cover Data (NLCD). The code processes addresses by drawing a rough one-mile buffer around each individual's residential address, and calculating the percentage of forest/developed open space using the class number assigned by offcial NLCD site. 
 
 # Greenness Coverage 
 ![Walkscore Map](https://github.com/YSun-umich/MAPOR2025-/blob/main/Greenness.png?raw=true)
