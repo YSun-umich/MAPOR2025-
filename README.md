@@ -9,7 +9,7 @@ The health data and individual information come from a previously completed heal
 The R script contains the complete process of data analysis (e.g., data cleaning, recoding, exploratory analysis,visualizations, model fitting, and model selection). 
 
 # Greenness Coverage 
-!(https://github.com/YSun-umich/MAPOR2025-/blob/main/Walkscore.png)
+![Walkscore Map](https://github.com/YSun-umich/MAPOR2025-/blob/main/Walkscore.png?raw=true)
 
 This picturegives a visual illustration of what our greenness measure looks like from the map.
 On the top row, you see an example of a location with high greenness, on the left is the view from Google Map, and on the right is the same location overlaid with national land cover classifications. We draw a one-mile buffer centered around the location, and you can see that most of the surrounding land is covered by vegetation, results in a high greenness percentage.
