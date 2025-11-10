@@ -1,0 +1,2515 @@
+---
+title: "MAPOR_2025"
+output: pdf_document
+date: "2025-09-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(readxl)
+library(writexl)
+```
+
+# Read in RAW dataset downloaded with interested variables
+
+```{r}
+added <- read_excel("Raw_Extracted.10.15.2025.xlsx") 
+# data <- read.csv("DATA_ALL_raw.09.27.csv")
+```
+
+# Var check
+
+### Drop those whose address are missing
+
+```{r}
+class(data$ZIPCODE)
+data$ZIPCODE <- as.numeric(data$ZIPCODE)
+
+class(data$CITY)
+class(data$STREET)
+
+class(data$LONGITUDE)
+data$LONGITUDE <- as.numeric(data$LONGITUDE)
+data$LATITUDE <- as.numeric(data$LATITUDE)
+
+data <- data %>%
+  filter(!is.na(LATITUDE), 
+         !is.na(LONGITUDE),
+         !is.na(CITY),
+         !is.na(STREET), 
+         !is.na(ZIPCODE),
+         LATITUDE != 0, 
+         LONGITUDE != 0,
+         CITY != 0,
+         STREET != 0,
+         ZIPCODE != 0)
+```
+
+### Create two data sets by year
+
+```{r}
+data_2023 <- data %>%
+  filter(CURRENT_YR != 2022, CURRENT_YR == 2023)
+
+data_2022 <- data %>%
+  filter(CURRENT_YR == 2022)
+```
+
+### Create ADDRESS column
+
+```{r}
+data <- data %>%
+  mutate(ADDRESS = paste(STREET, CITY, ZIPCODE, sep = ", "))
+```
+
+```{r}
+write.csv(data_2022, "Raw_2022_wAddress.csv", row.names = FALSE)
+
+write.csv(data_2023, "Raw_2023_wAddress.csv", row.names = FALSE)
+```
+
+### Green Space and Developed Open Space
+
+```{r}
+# This is after having obtained the NLCD data for each individual
+
+# Drop HI residents as NLCD does not cover HI
+
+#data_2022 <- read.csv("Raw_2022_wAddress.csv")
+#data_2023 <- read.csv("Raw_2023_wAddress.csv")
+
+combined <- bind_rows(data_2022, data_2023)
+# Combined has the 1-mile radius coverage data from NLCD 2022/2023 for Green/DOS
+
+#result <- data$CITY[is.na(data$G_DOS_P) | data$G_DOS_P == 0]
+#data <- data[!(is.na(data$G_DOS_P) | data$G_DOS_P == 0), ]
+
+write.csv(combined, "Combined.csv", row.names = FALSE)
+```
+
+### Walk Score and Recreational Facility Integration
+
+```{r}
+# This is after having obtained the Walk Score and recrentional facility count data
+# Need to re-code the severity description based on the website's scale 
+```
+
+# Recoding-Demographics
+
+```{r}
+data<- read.csv("Combined_10.27.csv")
+```
+
+###Edu
+```{r}
+data$B4 <- as.numeric(data$B4)
+
+data <- data %>% 
+ mutate(
+    EDU = case_when(
+      B4 %in% c(1, 2, 3, 4, 5, 6) ~ "Bachelor's or less",   
+      B4 %in% c(7, 8, 9) ~ "Master's or more",       
+      TRUE ~ NA_character_                                      
+    ) %>% fct_relevel("Bachelor's or less", "Master's or more")
+    )
+```
+
+### Sex
+```{r}
+# Re-code SEX as categorical
+data$SEX <- as.factor(data$SEX)
+data$SEX <- ifelse(data$SEX == 1, "male", 
+                ifelse(data$SEX == 2, "female", data$SEX))
+```
+
+### Age
+
+```{r}
+data$AGE <- as.numeric(data$AGE)
+
+data <- data %>%
+  mutate(AGE_centered = as.numeric(AGE - mean(AGE, na.rm = TRUE)))
+```
+
+### Income
+
+```{r}
+data$N3_numeric = as.numeric(as.character(data$N3))
+
+data <- data %>%
+  mutate(
+    N3_numeric = as.numeric(as.character(N3)),
+    
+    income_category = case_when(
+      N3_numeric == 0 ~ "No Income",
+      N3_numeric > 0 & N3_numeric < 10000 ~ "Very Low (<$10K)",
+      N3_numeric >= 10000 & N3_numeric < 25000 ~ "Low ($10K-25K)",
+      N3_numeric >= 25000 & N3_numeric < 50000 ~ "Lower Middle ($25K-50K)",
+      N3_numeric >= 50000 & N3_numeric < 100000 ~ "Middle ($50K-100K)",
+      N3_numeric >= 100000 & N3_numeric < 200000 ~ "Upper Middle ($100K-200K)",
+      N3_numeric >= 200000 ~ "High ($200K+)",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+### Residential Type
+
+```{r}
+data <- data %>%
+  mutate(
+    building_type = case_when(
+      B7 == 1 ~ "One-family house",
+      B7 == 2 ~ "Multi-unit building", 
+      B7 == 3 ~ "Mobile home",
+      B7 == 4 ~ "Other",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+# Recoding-Outcomes
+
+### Good Health (self-rated health)
+```{r}
+data <- data %>%
+  mutate(
+    GoodHealth = ifelse(is.na(SRH), NA, ifelse(SRH < 3, 1, 0))
+  )
+
+data$GoodHealth_binary <- ifelse(data$`GoodHealth` == 1, "Good Health",
+                                            ifelse(data$`GoodHealth` == 0, "no Good Health", NA))
+
+class(data$GoodHealth_binary)
+# Good Health: 1 
+# Bad Health: 0
+
+# GoodHealth = ifelse(is.na(SRH), NA, ifelse(SRH < 3, 1, 0))
+# BadHealth = ifelse(is.na(SRH), NA, ifelse(SRH > 3, 1, 0))
+```
+
+### Life Satisfaction
+
+```{r}
+data <- data %>%
+  mutate(
+    LifeSat = ifelse(is.na(E5_EX_1) & is.na(E5_1_1) & 
+                     is.na(E5_EX_2) & is.na(E5_1_2), NA,
+                    ifelse(E5_EX_1 %in% c(1,2) | E5_1_1 %in% c(1,2) |
+                           E5_EX_2 %in% c(1,2) | E5_1_2 %in% c(1,2), 1, 0))
+  )
+
+# 1: satisfied 
+```
+
+### Loneliness
+
+```{r}
+data <- data %>%
+  mutate(
+    Lonely2 = ifelse(LONELINESS_MEAN > 1, 1, 0)
+  )
+
+# 1: lonely
+```
+
+### Serious Distress
+
+```{r}
+names(data)[names(data) == "K6_CAT"] <- "Psychological distress"
+
+# data <- data %>% mutate( SeriousDistress = ifelse(is.na(K6_CAT), NA, ifelse(K6_CAT == 3, 1, 0)))
+
+# 1: serious distress 
+```
+
+### BMI
+
+```{r}
+data <- data %>%
+  mutate(
+    BMI_cat = case_when(
+      BMI < 18.5 ~ "Underweight",
+      BMI >= 18.5 & BMI < 25 ~ "Normal weight",
+      BMI >= 25 & BMI < 30 ~ "Overweight", 
+      BMI >= 30 ~ "Obese",
+      TRUE ~ NA_character_
+    )
+  )
+
+```
+
+### Chronic Disease
+
+```{r}
+data <- data %>%
+  mutate(
+    Chronic_disease_count = rowSums(select(., C2:C11) == 1, na.rm = TRUE)
+  )
+
+data <- data %>%
+  mutate(
+    Chronic_disease_cat = case_when(
+      Chronic_disease_count == 0 ~ "zero",
+      Chronic_disease_count >= 1 ~ "one or more",
+      TRUE ~ NA_character_
+    )
+  )
+
+# data <- data %>%
+  mutate(
+    Chronic_disease_cat = case_when(
+      Chronic_disease_count == 0 ~ "zero",
+      Chronic_disease_count == 1 ~ "one", 
+      Chronic_disease_count >= 2 ~ "two or more",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+# Read in contextual data-census tract level
+
+```{r}
+hospital <- load("C:/Users/sybox/MPSDS-RA/MAPOR2025/NaNDA/Hospitals.rda")
+
+parks <- load("C:/Users/sybox/MPSDS-RA/MAPOR2025/NaNDA/Parks.rda", verbose = TRUE)
+
+polluting <- load("C:/Users/sybox/MPSDS-RA/MAPOR2025/NaNDA/Polluting_Sites.rda")
+  
+land_cover <- load("C:/Users/sybox/MPSDS-RA/MAPOR2025/NaNDA/Land_Cover.rda")
+
+land_cover_data <- da38598.0002
+polluting_data <- da38597.0003
+hospital_data <- da39378.0004
+parks_data <- da38586.0003
+```
+
+### Matching ZIPCODE with TRACT_FIPSCODE
+
+```{r}
+match <- read_excel("ZIP_TRACT_032023.xlsx", sheet = 1)  
+colnames(match)
+```
+
+```{r}
+data <- data %>%
+  mutate(ZIPCODE = as.character(ZIPCODE))
+match <- match %>%
+  mutate(ZIP = as.character(ZIP), TRACT = as.character(TRACT))
+
+ziptract_pairs <- match %>%
+  dplyr::filter(ZIP %in% data$ZIPCODE) %>%
+  dplyr::select(ZIP, TRACT, RES_RATIO, TOT_RATIO)
+
+dominant_tract_per_zip <- match %>%
+  dplyr::filter(ZIP %in% data$ZIPCODE) %>%
+  group_by(ZIP) %>%
+  slice_max(RES_RATIO, n = 1) %>%
+  ungroup() %>%
+  dplyr::select(ZIP, TRACT, RES_RATIO, TOT_RATIO)
+
+zip_tract_lookup <- dominant_tract_per_zip %>% dplyr::select(ZIP, TRACT)
+
+# Join TRACT column into your data
+data <- data %>%
+  left_join(zip_tract_lookup, by = c("ZIPCODE" = "ZIP"))
+
+data <- data %>% 
+  mutate(
+    TRACT = dominant_tract_per_zip$TRACT[match(ZIPCODE, dominant_tract_per_zip$ZIP)]
+  )
+```
+
+### Move the contextual data using TRACT
+
+#### Land cover
+
+```{r}
+# land cover
+land_cover_data <- land_cover_data %>%
+  mutate(YEAR = as.numeric(YEAR)) %>%    # If YEAR is not already numeric
+  filter(YEAR == 2022)
+
+land_cover_subset <- land_cover_data %>%
+   dplyr::select(TRACT_FIPS20, PROP_DEV_OPENSPACE, PROP_EVERGREENFOREST, PROP_MIXEDFOREST, PROP_DECIDUOUSFOREST)
+
+data <- data %>%
+  mutate(TRACT = as.character(TRACT))
+
+land_cover_subset <- land_cover_data %>%
+  mutate(YEAR = as.numeric(YEAR)) %>%        # Ensure values are numeric
+  filter(YEAR == 2022) %>%
+  dplyr::select(TRACT_FIPS20, PROP_DEV_OPENSPACE, PROP_EVERGREENFOREST, PROP_MIXEDFOREST, PROP_DECIDUOUSFOREST) %>%
+  mutate(TRACT_FIPS20 = as.character(TRACT_FIPS20)) # for joining
+
+data <- data %>%
+  left_join(land_cover_subset, by = c("TRACT" = "TRACT_FIPS20"))
+
+data <- data %>%
+  mutate(
+        PROP_DEV_OPENSPACE   = as.numeric(PROP_DEV_OPENSPACE),
+    PROP_EVERGREENFOREST   = as.numeric(PROP_EVERGREENFOREST),
+    PROP_MIXEDFOREST       = as.numeric(PROP_MIXEDFOREST),
+    PROP_DECIDUOUSFOREST   = as.numeric(PROP_DECIDUOUSFOREST),
+    TRACT_GREENSPACE        = PROP_EVERGREENFOREST + PROP_MIXEDFOREST + PROP_DECIDUOUSFOREST
+  )
+```
+
+#### Polluting data
+
+```{r}
+polluting_data <- polluting_data %>%
+  mutate(YEAR = as.numeric(YEAR)) %>%    # If YEAR is not already numeric
+  filter(YEAR == 2021)
+
+polluting_data <- polluting_data %>%
+   mutate(COUNT_TRI_FACILITIES = as.numeric(COUNT_TRI_FACILITIES),
+          TRACT_FIPS20 = as.character(TRACT_FIPS20))
+
+data <- data %>%
+  left_join(polluting_data, by = c("TRACT" = "TRACT_FIPS20"))
+
+```
+
+#### Parks
+
+```{r}
+parks_data <- parks_data %>%
+  mutate(YEAR = as.numeric(COUNT_OPEN_PARKS),
+         TRACT_FIPS20 = as.character(TRACT_FIPS20)) %>% 
+  dplyr::select(TRACT_FIPS20, COUNT_OPEN_PARKS)
+
+data <- data %>%
+  left_join(parks_data, by = c("TRACT" = "TRACT_FIPS20"))
+```
+
+# Exploratory Anslysis 11.03
+### recode the outcomes
+```{r}
+data_clean <- data %>% drop_na(`Psychological distress`, GoodHealth, LifeSat, Lonely2, BMI_cat, Chronic_disease_cat)
+
+data_clean$`Psychological distress` <- factor(data_clean$`Psychological distress`,
+                                     levels = c(1, 2, 3),
+                                     labels = c("No distress", "Mild Distress", "Serious Distress"))
+
+data <- data %>%
+  mutate(# GoodHealth: Binary (1 = Good, 0 = Not good)
+    GoodHealth = factor(GoodHealth,
+                       levels = c(0, 1),
+                       labels = c("Not good health", "Good health")),
+    
+    # LifeSat: Binary (1 = Satisfied, 0 = Not satisfied)
+    LifeSat = factor(LifeSat,
+                    levels = c(0, 1),
+                    labels = c("Not satisfied", "Satisfied")),
+    
+    # Lonely2: Binary (1 = Lonely, 0 = Not lonely)
+    Lonely2 = factor(Lonely2,
+                    levels = c(0, 1),
+                    labels = c("Not lonely", "Lonely")),
+    
+    # BMI_cat: Already character, convert to factor with logical order
+    BMI_cat = factor(BMI_cat,
+                    levels = c("Underweight", "Normal weight", "Overweight", "Obese")),
+    
+    # Chronic_disease_cat: Already character, convert to factor
+    Chronic_disease_cat = factor(Chronic_disease_cat,
+                                levels = c("zero", "one or more"))
+  )
+
+data_new <- data %>% drop_na(`Psychological distress`, GoodHealth, LifeSat, Lonely2, BMI_cat, Chronic_disease_cat)
+```
+
+### recode outcomes-1 mile
+```{r}
+# green_percentage as quantiles
+data_new <- data_new %>%
+  mutate(green_quartile = factor(ntile(green_percentage, 4),
+                                levels = 1:4,
+                                labels = c("Q1", "Q2", "Q3", "Q4")))
+
+data_new <- data_new %>%
+  mutate(
+    green_quartile_com = factor(ntile(green_percentage, 4),
+                            levels = 1:4,
+                            labels = c("Q1", "Q2", "Q3", "Q4")),
+    green_highest = case_when(
+      green_quartile == "Q4" ~ "Q4",
+      TRUE                   ~ "Q1-Q3"
+    ),
+    green_highest = factor(green_highest, levels = c("Q1-Q3", "Q4"))
+  )
+
+# open_space_percentage as quantiles
+data_new <- data_new %>%
+  mutate(
+    open_space_quartile = factor(
+      ntile(open_space_percentage, 4),
+      levels = 1:4,
+      labels = c("Q1", "Q2", "Q3", "Q4")
+    ),
+    openspace_highest = case_when(
+      open_space_quartile == "Q4" ~ "Q4", 
+      TRUE ~ "Q1-Q3"
+    ),
+    openspace_highest = factor(openspace_highest, levels = c("Q1-Q3", "Q4"))
+  )
+
+# walkscore as quantiles
+data_new <- data_new %>%
+  mutate(walkscore_quartile = factor(ntile(walkscore, 4),
+                                levels = 1:4,
+                                labels = c("Q1", "Q2", "Q3", "Q4")))
+
+data_new <- data_new %>% 
+  mutate(walkscore_highest = case_when(
+      walkscore_quartile == "Q4" ~ "Q4", 
+      TRUE ~ "Q1-Q3"
+    ),
+    walkscore_highest = factor(walkscore_highest, levels = c("Q1-Q3", "Q4")))
+
+# recreational count as quantiles 
+data_new <- data_new %>%
+  mutate(rec_facility_count_quartile = factor(ntile(rec_facility_count_1mile, 4),
+                                levels = 1:4,
+                                labels = c("Q1", "Q2", "Q3", "Q4")))
+
+data_new <- data_new %>% 
+  mutate(rec_facility_highest = case_when(
+      rec_facility_count_quartile == "Q4" ~ "Q4", 
+      TRUE ~ "Q1-Q3"
+    ),
+    rec_facility_highest = factor(rec_facility_highest, levels = c("Q1-Q3", "Q4")))
+```
+
+### recode outcomes-census tract
+```{r}
+# open space as quantiles
+
+# 11.04.2025
+recode_above_below_median <- function(x) {
+  median_x <- median(x, na.rm = TRUE)
+  ifelse(x > median_x, "Above", "Below")
+}
+
+data_new <- data_new %>%
+  mutate(
+    green_median = recode_above_below_median(green_percentage),
+    open_space_median = recode_above_below_median(open_space_percentage),
+    walkscore_median = recode_above_below_median(walkscore),
+    rec_median = recode_above_below_median(rec_facility_count_1mile)
+    # Add more lines for other predictors!
+  )
+
+
+data_new <- data_new %>%
+  mutate(Tract_openspace_quartile = factor(ntile(PROP_DEV_OPENSPACE, 4),
+                                levels = 1:4,
+                                labels = c("Q1", "Q2", "Q3", "Q4")))
+
+# green_space_percentage as quantiles
+data_new <- data_new %>%
+  mutate(Tract_greenspace_quartile = factor(ntile(TRACT_GREENSPACE, 4),
+                                levels = 1:4,
+                                labels = c("Q1", "Q2", "Q3", "Q4")))
+
+# parks as quantiles
+data_new <- data_new %>%
+  mutate(Tract_parks_quartile = factor(ntile(COUNT_OPEN_PARKS, 4),
+                                levels = 1:4,
+                                labels = c("Q1", "Q2", "Q3", "Q4")))
+
+```
+
+### view DV size
+```{r}
+library(dplyr)
+
+# List of variables to analyze
+variables <- c("Chronic_disease_cat", "LifeSat", "Lonely2", "Psychological distress")
+
+# 1. Chronic Disease percentages
+chronic_percent <- data_new %>%
+  filter(!is.na(Chronic_disease_cat)) %>%
+  count(Chronic_disease_cat) %>%
+  mutate(percentage = (n / sum(n)) * 100) %>%
+  mutate(variable = "Chronic_disease_cat") %>%
+  rename(category = Chronic_disease_cat) %>%
+  mutate(category = as.character(category))  # Convert to character
+
+# 2. Life Satisfaction percentages
+lifesat_percent <- data_new %>%
+  filter(!is.na(LifeSat)) %>%
+  count(LifeSat) %>%
+  mutate(percentage = (n / sum(n)) * 100) %>%
+  mutate(variable = "LifeSat") %>%
+  rename(category = LifeSat) %>%
+  mutate(category = as.character(category))  # Convert to character
+
+# 3. Loneliness percentages
+lonely_percent <- data_new %>%
+  filter(!is.na(Lonely2)) %>%
+  count(Lonely2) %>%
+  mutate(percentage = (n / sum(n)) * 100) %>%
+  mutate(variable = "Lonely2") %>%
+  rename(category = Lonely2) %>%
+  mutate(category = as.character(category))  # Convert to character
+
+# 4. Psychological Distress percentages
+psych_percent <- data_new %>%
+  filter(!is.na(`Psychological distress`)) %>%
+  count(`Psychological distress`) %>%
+  mutate(percentage = (n / sum(n)) * 100) %>%
+  mutate(variable = "Psychological_distress") %>%
+  rename(category = `Psychological distress`) %>%
+  mutate(category = as.character(category))  # Convert to character
+
+# Combine all results
+all_percentages <- bind_rows(
+  chronic_percent,
+  lifesat_percent,
+  lonely_percent,
+  psych_percent
+)
+
+# View results
+print(all_percentages, n = 50)
+```
+
+
+### Green Cross Analysis 
+#### Psychological Distress X Green Space
+```{r}
+library(purrr)
+
+ggplot(data_clean, aes(x = `Psychological distress`, fill = `Psychological distress`)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ green_quartile, nrow = 1) +
+  labs(title = "Distribution of Psychological Distress by Green Space Quartile",
+       x = "Psychological Distress", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### GoodHealth X Green Space
+```{r}
+ggplot(data_clean, aes(x = factor(GoodHealth_binary), fill = factor(GoodHealth_binary))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ green_quartile, nrow = 1) +
+  labs(title = "Distribution of Good Health by Green Space Quartile",
+       x = "Good Health", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### LifeSat X Green Space
+```{r}
+ggplot(data_clean, aes(x = factor(LifeSat), fill = factor(LifeSat))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ green_quartile, nrow = 1) +
+  labs(title = "Distribution of Life Satisfaction by Green Space Quartile",
+       x = "Life Satisfaction", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### Lonely2 X Green Space
+```{r}
+ggplot(data_new, aes(x = Lonely2, fill = Lonely2)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ green_quartile, nrow = 1) +
+  labs(title = "Distribution of Loneliness by Green Space Quartile",
+       x = "Loneliness", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+data_percent <- data_new %>%
+  filter(!is.na(green_quartile), !is.na(Lonely2)) %>%  # Drop NA values
+  group_by(green_quartile, Lonely2) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  group_by(green_quartile) %>%
+  mutate(percentage = (count / sum(count)) * 100)
+
+ggplot(data_percent, aes(x = green_quartile, y = percentage, fill = Lonely2)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.8, width = 0.7) +
+  labs(title = "Percentage of Lonely vs Not Lonely by Green Space Quartile",
+       x = "Green Space Quartile", 
+       y = "Percentage (%)",
+       fill = "Loneliness Status") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 18),
+    axis.text.y = element_text(size = 18),  
+    axis.title.x = element_text(size = 20, margin = margin(t = 15)),
+    axis.title.y = element_text(size = 20, margin = margin(r = 15)),
+    plot.title = element_text(size = 22, hjust = 0.5, margin = margin(b = 20)),
+    legend.text = element_text(size = 18),
+    legend.title = element_text(size = 20),
+    legend.key.size = unit(2.5, "lines"),
+    legend.position = "top",
+    legend.margin = margin(b = 15)
+  ) +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5, size = 5)  # Smaller percentage labels (reduced from 8 to 5)
+
+# 11.6 stacked bar chart
+data_percent <- data_new %>%
+  filter(!is.na(green_quartile), !is.na(Lonely2)) %>%
+  count(green_quartile, Lonely2) %>%
+  group_by(green_quartile) %>%
+  mutate(percentage = n / sum(n) * 100) %>%
+  ungroup()
+
+# Create the stacked bar chart
+ggplot(data_percent, aes(x = green_quartile, y = percentage, fill = Lonely2)) +
+  geom_bar(stat = "identity", position = "stack", alpha = 0.8) +
+  labs(x = "Green Space Quartile", 
+       y = "Percentage (%)",
+       fill = "") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 22),
+    axis.text.y = element_text(size = 22),  
+    axis.title.x = element_text(size = 24),
+    axis.title.y = element_text(size = 24),
+    legend.text = element_text(size = 26),  # Increased legend text size
+    legend.position = "top",
+    legend.key.size = unit(2, "cm"),  # Larger legend color boxes
+    legend.margin = margin(t = 10, b = 10)  # More space around legend
+  ) +
+  geom_text(aes(label = paste0(round(percentage), "%")), 
+            position = position_stack(vjust = 0.5), 
+            size = 10, color = "black")
+
+
+
+
+contingency_table <- table(data_new$Lonely2, data_new$green_quartile)
+
+# Run chi-squared test
+chi_sq_test <- chisq.test(contingency_table)
+
+# Print results
+print(chi_sq_test)
+```
+
+#### BMI_cat X Green Space
+```{r}
+ggplot(data_clean, aes(x = BMI_cat, fill = BMI_cat)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ green_quartile, nrow = 1) +
+  labs(title = "Distribution of BMI Categories by Green Space Quartile",
+       x = "BMI Category", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+```
+
+#### Chronic_disease_cat X Green Space
+```{r}
+# ggplot(data_clean, aes(x = Chronic_disease_cat, fill = Chronic_disease_cat)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ green_quartile, nrow = 1) +
+  labs(title = "Distribution of Chronic Disease by Green Space Quartile",
+       x = "Chronic Disease", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+
+data_percent <- data_new %>%
+  filter(!is.na(green_quartile), !is.na(Chronic_disease_cat)) %>%  # Drop NA values
+  group_by(green_quartile, Chronic_disease_cat) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  group_by(green_quartile) %>%
+  mutate(percentage = (count / sum(count)) * 100)
+
+# Create the percentage bar plot using data_percent
+ggplot(data_percent, aes(x = green_quartile, y = percentage, fill = Chronic_disease_cat)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.8, width = 0.7) +
+  labs(title = "Percentage of Chronic Disease by Green Space Quartile",
+       x = "Green Space Quartile", 
+       y = "Percentage (%)",
+       fill = "Chronic Disease") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 18),
+    axis.text.y = element_text(size = 18),  
+    axis.title.x = element_text(size = 20, margin = margin(t = 15)),
+    axis.title.y = element_text(size = 20, margin = margin(r = 15)),
+    plot.title = element_text(size = 22, hjust = 0.5, margin = margin(b = 20)),
+    legend.text = element_text(size = 18),
+    legend.title = element_text(size = 20),
+    legend.key.size = unit(2.5, "lines"),
+    legend.position = "top",
+    legend.margin = margin(b = 15)
+  ) +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5, size = 5)  # Smaller percentage labels
+
+```
+
+### Developed Open Space Cross analysis 
+#### Psychological Distress 
+```{r}
+library(purrr)
+
+ggplot(data_clean, aes(x = `Psychological distress`, fill = `Psychological distress`)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ open_space_quartile, nrow = 1) +
+  labs(title = "Distribution of Psychological Distress by DEveloped open Space Quartile",
+       x = "Psychological Distress", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### GoodHealth
+```{r}
+ggplot(data_clean, aes(x = factor(GoodHealth_binary), fill = factor(GoodHealth_binary))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ open_space_quartile, nrow = 1) +
+  labs(title = "Distribution of Good Health by Developed open Space Quartile",
+       x = "Good Health", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### LifeSat 
+```{r}
+ggplot(data_clean, aes(x = factor(LifeSat), fill = factor(LifeSat))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ open_space_quartile, nrow = 1) +
+  labs(title = "Distribution of Life Satisfaction by developed open space",
+       x = "Life Satisfaction", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### Lonely2 
+```{r}
+ggplot(data_clean, aes(x = Lonely2, fill = Lonely2)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ open_space_quartile, nrow = 1) +
+  labs(title = "Distribution of Loneliness by Developed Open Space Quartile",
+       x = "Loneliness", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### BMI_cat 
+```{r}
+ggplot(data_clean, aes(x = BMI_cat, fill = BMI_cat)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ open_space_quartile, nrow = 1) +
+  labs(title = "Distribution of BMI Categories",
+       x = "BMI Category", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+```
+
+#### Chronic_disease_cat 
+```{r}
+ggplot(data_clean, aes(x = Chronic_disease_cat, fill = Chronic_disease_cat)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ open_space_quartile, nrow = 1) +
+  labs(title = "Distribution of Chronic Disease by Open Space",
+       x = "Chronic Disease", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+
+
+```
+
+### Walkscore Cross analysis  rec_facility_count
+#### Psychological Distress 
+```{r}
+library(purrr)
+
+ggplot(data_clean, aes(x = `Psychological distress`, fill = `Psychological distress`)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ walkscore_quartile, nrow = 1) +
+  labs(title = "Distribution of Psychological Distress by walkscore",
+       x = "Psychological Distress", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### GoodHealth
+```{r}
+ggplot(data_clean, aes(x = factor(GoodHealth_binary), fill = factor(GoodHealth_binary))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ walkscore_quartile, nrow = 1) +
+  labs(title = "Distribution of Good Health by walk score",
+       x = "Good Health", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### LifeSat 
+```{r}
+ggplot(data_clean, aes(x = factor(LifeSat), fill = factor(LifeSat))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ walkscore_quartile, nrow = 1) +
+  labs(title = "Distribution of Life Satisfaction",
+       x = "Life Satisfaction", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### Lonely2 
+```{r}
+data_percent <- data_new %>%
+  filter(!is.na(walkscore_quartile), !is.na(Lonely2)) %>%
+  group_by(walkscore_quartile, Lonely2) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  group_by(walkscore_quartile) %>%
+  mutate(percentage = (count / sum(count)) * 100)
+
+ggplot(data_percent, aes(x = walkscore_quartile, y = percentage, fill = Lonely2)) +
+  geom_bar(stat = "identity", position = "stack", alpha = 0.8) +
+  labs(x = "Walkscore Quartile", 
+       y = "Percentage (%)",
+       fill = "") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 22),  # Increased from 18
+    axis.text.y = element_text(size = 22),  # Increased from 18
+    axis.title.x = element_text(size = 24), # Increased from 20
+    axis.title.y = element_text(size = 24), # Increased from 20
+    legend.text = element_text(size = 26),  # Increased from 20
+    legend.position = "top",
+    legend.key.size = unit(2, "cm"),       # Added larger legend boxes
+    legend.margin = margin(t = 10, b = 10) # Added legend spacing
+  ) +
+  geom_text(aes(label = paste0(round(percentage), "%")), 
+            position = position_stack(vjust = 0.5), 
+            size = 10, color = "black")    # Changed to black
+
+
+contingency_table <- table(data_new$Lonely2, data_new$walkscore_quartile)
+
+# Run chi-squared test
+chi_sq_test <- chisq.test(contingency_table)
+
+# Print results
+print(chi_sq_test)
+
+```
+
+#### BMI_cat 
+```{r}
+ggplot(data_clean, aes(x = BMI_cat, fill = BMI_cat)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ walkscore_quartile, nrow = 1) +
+  labs(title = "Distribution of BMI Categories",
+       x = "BMI Category", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+```
+
+#### Chronic_disease_cat 
+```{r}
+ggplot(data_clean, aes(x = Chronic_disease_cat, fill = Chronic_disease_cat)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ walkscore_quartile, nrow = 1) +
+  labs(title = "Distribution of Chronic Disease by walkscore",
+       x = "Chronic Disease", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+
+data_percent <- data_new %>%
+  filter(!is.na(walkscore_quartile), !is.na(Chronic_disease_cat)) %>%  # Drop NA values
+  group_by(walkscore_quartile, Chronic_disease_cat) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  group_by(walkscore_quartile) %>%
+  mutate(percentage = (count / sum(count)) * 100)
+
+# Create the percentage bar plot using data_percent
+ggplot(data_percent, aes(x = walkscore_quartile, y = percentage, fill = Chronic_disease_cat)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.8, width = 0.7) +
+  labs(title = "Percentage of Chronic Disease by Walkscore Quartile",
+       x = "Walkscore Quartile", 
+       y = "Percentage (%)",
+       fill = "Chronic Disease") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 18),
+    axis.text.y = element_text(size = 18),  
+    axis.title.x = element_text(size = 20, margin = margin(t = 15)),
+    axis.title.y = element_text(size = 20, margin = margin(r = 15)),
+    plot.title = element_text(size = 22, hjust = 0.5, margin = margin(b = 20)),
+    legend.text = element_text(size = 18),
+    legend.title = element_text(size = 20),
+    legend.key.size = unit(2.5, "lines"),
+    legend.position = "top",
+    legend.margin = margin(b = 15)
+  ) +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5, size = 5)  # Smaller percentage labels
+
+```
+### rec_facility Cross analysis 
+#### Psychological Distress 
+```{r}
+library(purrr)
+
+ggplot(data_clean, aes(x = `Psychological distress`, fill = `Psychological distress`)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ rec_facility_count_quartile, nrow = 1) +
+  labs(title = "Distribution of Psychological Distress by recreational faclility count",
+       x = "Psychological Distress", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### GoodHealth
+```{r}
+ggplot(data_clean, aes(x = factor(GoodHealth_binary), fill = factor(GoodHealth_binary))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ rec_facility_count_quartile, nrow = 1) +
+  labs(title = "Distribution of Good Health by receationa facility count",
+       x = "Good Health", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### LifeSat 
+```{r}
+ggplot(data_clean, aes(factor(LifeSat), fill = factor(LifeSat))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ rec_facility_count_quartile, nrow = 1) +
+  labs(title = "Distribution of Life Satisfaction by recreational facility count",
+       x = "Life Satisfaction", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### Lonely2 
+```{r}
+
+data_percent <- data_new %>%
+  filter(!is.na(rec_facility_count_quartile), !is.na(Lonely2)) %>%
+  group_by(rec_facility_count_quartile, Lonely2) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  group_by(rec_facility_count_quartile) %>%
+  mutate(percentage = (count / sum(count)) * 100)
+
+ggplot(data_percent, aes(x = rec_facility_count_quartile, y = percentage, fill = Lonely2)) +
+  geom_bar(stat = "identity", position = "stack", alpha = 0.8) +
+  labs(x = "Recreational Facility Count Quartile", 
+       y = "Percentage (%)",
+       fill = "") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 22),  # Increased from 18
+    axis.text.y = element_text(size = 22),  # Increased from 18
+    axis.title.x = element_text(size = 24), # Increased from 20
+    axis.title.y = element_text(size = 24), # Increased from 20
+    legend.text = element_text(size = 26),  # Increased from 20
+    legend.position = "top",
+    legend.key.size = unit(2, "cm"),       # Added larger legend boxes
+    legend.margin = margin(t = 10, b = 10) # Added legend spacing
+  ) +
+  geom_text(aes(label = paste0(round(percentage), "%")), 
+            position = position_stack(vjust = 0.5), 
+            size = 10, color = "black")    # Changed to black
+
+
+contingency_table <- table(data_new$Lonely2, data_new$rec_facility_count_quartile)
+
+# Run chi-squared test
+chi_sq_test <- chisq.test(contingency_table)
+
+# Print results
+print(chi_sq_test)
+
+```
+
+#### BMI_cat 
+```{r}
+ggplot(data_clean, aes(x = BMI_cat, fill = BMI_cat)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ rec_facility_count_quartile, nrow = 1) +
+  labs(title = "Distribution of BMI Categories",
+       x = "BMI Category", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+```
+
+#### Chronic_disease_cat 
+```{r}
+ggplot(data_clean, aes(x = Chronic_disease_cat, fill = Chronic_disease_cat)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ rec_facility_count_quartile, nrow = 1) +
+  labs(title = "Distribution of Chronic Disease by recreational facility count",
+       x = "Chronic Disease", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+data_percent <- data_new %>%
+  filter(!is.na(rec_facility_count_quartile), !is.na(Chronic_disease_cat)) %>%  # Drop NA values
+  group_by(rec_facility_count_quartile, Chronic_disease_cat) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  group_by(rec_facility_count_quartile) %>%
+  mutate(percentage = (count / sum(count)) * 100)
+
+# Create the percentage bar plot using data_percent
+ggplot(data_percent, aes(x = rec_facility_count_quartile, y = percentage, fill = Chronic_disease_cat)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.8, width = 0.7) +
+  labs(title = "Percentage of Chronic Disease by Recreational Facility Count Quartile",
+       x = "Recreational Facility Count Quartile", 
+       y = "Percentage (%)",
+       fill = "Chronic Disease") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 18),
+    axis.text.y = element_text(size = 18),  
+    axis.title.x = element_text(size = 20, margin = margin(t = 15)),
+    axis.title.y = element_text(size = 20, margin = margin(r = 15)),
+    plot.title = element_text(size = 22, hjust = 0.5, margin = margin(b = 20)),
+    legend.text = element_text(size = 18),
+    legend.title = element_text(size = 20),
+    legend.key.size = unit(2.5, "lines"),
+    legend.position = "top",
+    legend.margin = margin(b = 15)
+  ) +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5, size = 5)  # Smaller percentage labels
+
+```
+### tract parks Cross analysis 
+#### Psychological Distress 
+```{r}
+library(purrr)
+
+ggplot(data_clean, aes(x = `Psychological distress`, fill = `Psychological distress`)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_parks_quartile, nrow = 1) +
+  labs(title = "Distribution of Psychological Distress by tract parks count",
+       x = "Psychological Distress", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### GoodHealth
+```{r}
+ggplot(data_clean, aes(x = factor(GoodHealth_binary), fill = factor(GoodHealth_binary))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_parks_quartile, nrow = 1) +
+  labs(title = "Distribution of Good Health by tract parks count",
+       x = "Good Health", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### LifeSat 
+```{r}
+ggplot(data_clean, aes(factor(LifeSat), fill = factor(LifeSat))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_parks_quartile, nrow = 1) +
+  labs(title = "Distribution of Life Satisfaction by tract parks count",
+       x = "Life Satisfaction", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### Lonely2 
+```{r}
+ggplot(data_clean, aes(x = Lonely2, fill = Lonely2)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_parks_quartile, nrow = 1) +
+  labs(title = "Distribution of Loneliness by tract parks count",
+       x = "Loneliness", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### BMI_cat 
+```{r}
+ggplot(data_clean, aes(x = BMI_cat, fill = BMI_cat)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_parks_quartile, nrow = 1) +
+  labs(title = "Distribution of BMI Categories",
+       x = "BMI Category", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+```
+
+#### Chronic_disease_cat 
+```{r}
+ggplot(data_clean, aes(x = Chronic_disease_cat, fill = Chronic_disease_cat)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_parks_quartile, nrow = 1) +
+  labs(title = "Distribution of Chronic Disease",
+       x = "Chronic Disease", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+
+
+```
+### tract open space Cross analysis 
+#### Psychological Distress 
+```{r}
+library(purrr)
+
+ggplot(data_clean, aes(x = `Psychological distress`, fill = `Psychological distress`)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_openspace_quartile, nrow = 1) +
+  labs(title = "Distribution of Psychological Distress by tract developed open space",
+       x = "Psychological Distress", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### GoodHealth
+```{r}
+ggplot(data_clean, aes(x = factor(GoodHealth_binary), fill = factor(GoodHealth_binary))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_openspace_quartile, nrow = 1) +
+  labs(title = "Distribution of Good Health by tract developed open space",
+       x = "Good Health", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### LifeSat 
+```{r}
+ggplot(data_clean, aes(factor(LifeSat), fill = factor(LifeSat))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_openspace_quartile, nrow = 1) +
+  labs(title = "Distribution of Life Satisfaction by tract open space",
+       x = "Life Satisfaction", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### Lonely2 
+```{r}
+ggplot(data_clean, aes(x = Lonely2, fill = Lonely2)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_openspace_quartile, nrow = 1) +
+  labs(title = "Distribution of Loneliness by tract openspace",
+       x = "Loneliness", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### BMI_cat 
+```{r}
+ggplot(data_clean, aes(x = BMI_cat, fill = BMI_cat)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_openspace_quartile, nrow = 1) +
+  labs(title = "Distribution of BMI Categories",
+       x = "BMI Category", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+```
+
+#### Chronic_disease_cat 
+```{r}
+ggplot(data_clean, aes(x = Chronic_disease_cat, fill = Chronic_disease_cat)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_openspace_quartile, nrow = 1) +
+  labs(title = "Distribution of Chronic Disease by tract developed openspace",
+       x = "Chronic Disease", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+### tract green space Cross analysis 
+#### Psychological Distress 
+```{r}
+library(purrr)
+
+ggplot(data_clean, aes(x = `Psychological distress`, fill = `Psychological distress`)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_greenspace_quartile, nrow = 1) +
+  labs(title = "Distribution of Psychological Distress by tract green percentage",
+       x = "Psychological Distress", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### GoodHealth
+```{r}
+ggplot(data_clean, aes(x = factor(GoodHealth_binary), fill = factor(GoodHealth_binary))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_greenspace_quartile, nrow = 1) +
+  labs(title = "Distribution of Good Health by tract green space",
+       x = "Good Health", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### LifeSat 
+```{r}
+ggplot(data_clean, aes(factor(LifeSat), fill = factor(LifeSat))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_greenspace_quartile, nrow = 1) +
+  labs(title = "Distribution of Life Satisfaction by tract green space",
+       x = "Life Satisfaction", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### Lonely2 
+```{r}
+ggplot(data_clean, aes(x = factor(Lonely2), fill = factor(Lonely2))) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_greenspace_quartile, nrow = 1) +
+  labs(title = "Distribution of Loneliness by Tract green space",
+       x = "Loneliness", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+#### BMI_cat 
+```{r}
+ggplot(data_clean, aes(x = BMI_cat, fill = BMI_cat)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_openspace_quartile, nrow = 1) +
+  labs(title = "Distribution of BMI Categories",
+       x = "BMI Category", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+```
+
+#### Chronic_disease_cat 
+```{r}
+ggplot(data_new, aes(x = Chronic_disease_cat, fill = Chronic_disease_cat)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(~ Tract_greenspace_quartile, nrow = 1) +
+  labs(title = "Distribution of Chronic Disease by census green percentage",
+       x = "Chronic Disease", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+```
+
+# Modeling
+### Loneliness
+```{r}
+#data_clean$B4 <- as.numeric(data_clean$B4)
+# data_clean$Lonely2 <- factor(data_clean$Lonely2, levels = c("0", "1"), labels = c("Not lonely", "Lonely"))
+
+model_base <- glm(Lonely2 ~ AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+
+
+model_green <- glm(Lonely2 ~ green_quartile + AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+
+model_developed <- glm(Lonely2 ~ open_space_quartile + AGE_centered + SEX + N3_numeric + B4,data = data_new, family = binomial)
+
+model_walkscore <- glm(Lonely2 ~ walkscore_quartile + AGE_centered + SEX + N3_numeric + B4,data = data_new, family = binomial)
+
+model_rec <- glm(Lonely2 ~ rec_facility_count_quartile + AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+
+all_results <- bind_rows(
+  tidy(model_base, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Baseline"),
+  tidy(model_green, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Green Space"),
+  tidy(model_developed, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Open Space"),
+  tidy(model_walkscore, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Walkscore"),
+  tidy(model_rec, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Rec Facilities")
+)
+
+# Clean up the table
+results_table <- all_results %>%
+  select(model, term, estimate, conf.low, conf.high, p.value) %>%
+  mutate(
+    across(c(estimate, conf.low, conf.high), ~ round(., 3)),
+    p.value = round(p.value, 4),
+    significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    ),
+    # Format for easy reading
+    OR_95CI = paste0(estimate, " (", conf.low, "-", conf.high, ")", significance)
+  )
+
+# View the full table
+print(results_table, n = Inf)
+write.csv(results_table, "Loneliness.csv", row.names = FALSE)
+
+```
+
+### Fit test
+```{r}
+library(lmtest)
+
+library(pROC)
+
+# Create a complete case dataset for consistent comparisons
+model_lone_complete_data <- data_new %>%
+  filter(
+    !is.na(Lonely2),
+    !is.na(AGE_centered),
+    !is.na(SEX),
+    !is.na(N3_numeric),
+    !is.na(B4),
+    !is.na(green_quartile),
+    !is.na(open_space_quartile),
+    !is.na(walkscore_quartile),
+    !is.na(rec_facility_count_quartile)
+  )
+
+cat("Complete cases:", nrow(model_lone_complete_data), "rows\n")
+
+# Refit models on the same complete dataset
+model_base_complete <- glm(Lonely2 ~ AGE_centered + SEX + N3_numeric + B4, 
+                          data = model_lone_complete_data, family = binomial)
+model_green_complete <- glm(Lonely2 ~ green_quartile + AGE_centered + SEX + N3_numeric + B4, 
+                           data = model_lone_complete_data, family = binomial)
+model_developed_complete <- glm(Lonely2 ~ open_space_quartile + AGE_centered + SEX + N3_numeric + B4,
+                               data = model_lone_complete_data, family = binomial)
+model_walkscore_complete <- glm(Lonely2 ~ walkscore_quartile + AGE_centered + SEX + N3_numeric + B4,
+                               data = model_lone_complete_data, family = binomial)
+model_rec_complete <- glm(Lonely2 ~ rec_facility_count_quartile + AGE_centered + SEX + N3_numeric + B4,
+                         data = model_lone_complete_data, family = binomial)
+
+# Now calculate AUC with consistent data
+calculate_auc <- function(model, data) {
+  predictions <- predict(model, newdata = data, type = "response")
+  auc <- auc(roc(data$Lonely2, predictions))
+  return(auc)
+}
+
+auc_results <- data.frame(
+  model = c("Baseline", "Green Space", "Open Space", "Walkscore", "Rec Facilities"),
+  AUC = c(
+    calculate_auc(model_base_complete, model_lone_complete_data),
+    calculate_auc(model_green_complete, model_lone_complete_data),
+    calculate_auc(model_developed_complete, model_lone_complete_data),
+    calculate_auc(model_walkscore_complete, model_lone_complete_data),
+    calculate_auc(model_rec_complete, model_lone_complete_data)
+  )
+)
+
+# Also update LRT tests with the complete models
+lr_green <- lrtest(model_base_complete, model_green_complete)
+lr_developed <- lrtest(model_base_complete, model_developed_complete)
+lr_walkscore <- lrtest(model_base_complete, model_walkscore_complete)
+lr_rec <- lrtest(model_base_complete, model_rec_complete)
+
+lrt_results <- data.frame(
+  model = c("Green Space", "Open Space", "Walkscore", "Rec Facilities"),
+  LRT_chisq = c(lr_green$Chisq[2], lr_developed$Chisq[2], lr_walkscore$Chisq[2], lr_rec$Chisq[2]),
+  LRT_df = c(lr_green$Df[2], lr_developed$Df[2], lr_walkscore$Df[2], lr_rec$Df[2]),
+  LRT_pvalue = c(lr_green$`Pr(>Chisq)`[2], lr_developed$`Pr(>Chisq)`[2], 
+                 lr_walkscore$`Pr(>Chisq)`[2], lr_rec$`Pr(>Chisq)`[2])
+)
+
+# Print results
+cat("Likelihood Ratio Tests (compared to baseline):\n")
+print(lrt_results)
+
+cat("\nArea Under Curve (AUC) for each model:\n")
+print(auc_results)
+
+# AIC values
+cat("\nAIC values:\n")
+aic_results <- data.frame(
+  model = c("Baseline", "Green Space", "Open Space", "Walkscore", "Rec Facilities"),
+  AIC = c(AIC(model_base_complete), AIC(model_green_complete), AIC(model_developed_complete), 
+          AIC(model_walkscore_complete), AIC(model_rec_complete))
+)
+print(aic_results)
+
+
+```
+
+```{r}
+library(ResourceSelection)
+
+# Run Hosmer-Lemeshow tests for all models
+hl_base <- hoslem.test(model_base_complete$y, fitted(model_base_complete), g = 10)
+hl_green <- hoslem.test(model_green_complete$y, fitted(model_green_complete), g = 10)
+hl_developed <- hoslem.test(model_developed_complete$y, fitted(model_developed_complete), g = 10)
+hl_walkscore <- hoslem.test(model_walkscore_complete$y, fitted(model_walkscore_complete), g = 10)
+hl_rec <- hoslem.test(model_rec_complete$y, fitted(model_rec_complete), g = 10)
+
+# Create results table
+hl_results <- data.frame(
+  model = c("Baseline", "Green Space", "Open Space", "Walkscore", "Rec Facilities"),
+  chi_squared = c(hl_base$statistic, hl_green$statistic, hl_developed$statistic, 
+                  hl_walkscore$statistic, hl_rec$statistic),
+  df = c(hl_base$parameter, hl_green$parameter, hl_developed$parameter,
+         hl_walkscore$parameter, hl_rec$parameter),
+  p_value = c(hl_base$p.value, hl_green$p.value, hl_developed$p.value,
+              hl_walkscore$p.value, hl_rec$p.value)
+)
+
+# Print results
+cat("Hosmer-Lemeshow Goodness-of-Fit Tests:\n")
+print(hl_results)
+
+# Interpretation
+cat("\nInterpretation:\n")
+cat("H0: Model fits the data well (p > 0.05 indicates good fit)\n")
+cat("H1: Model does not fit the data well (p < 0.05 indicates poor fit)\n\n")
+
+for(i in 1:nrow(hl_results)) {
+  fit_status <- ifelse(hl_results$p_value[i] > 0.05, "Good fit", "Poor fit")
+  cat(hl_results$model[i], ": p =", round(hl_results$p_value[i], 4), "-", fit_status, "\n")
+}
+
+```
+
+```{r}
+
+# Load required package
+library(broom)
+
+all_coefficients <- bind_rows(
+  tidy(model_base_complete, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Baseline"),
+  tidy(model_green_complete, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Green Space"),
+  tidy(model_developed_complete, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Open Space"),
+  tidy(model_walkscore_complete, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Walkscore"),
+  tidy(model_rec_complete, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Rec Facilities")
+)
+
+# Clean up the coefficients table
+coefficients_table <- all_coefficients %>%
+  select(model, term, estimate, conf.low, conf.high, p.value) %>%
+  mutate(
+    across(c(estimate, conf.low, conf.high), ~ round(., 3)),
+    p.value = round(p.value, 4),
+    significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    ),
+    OR_95CI = paste0(estimate, " (", conf.low, "-", conf.high, ")", significance)
+  )
+
+# View all coefficients
+print(coefficients_table, n = Inf)
+
+```
+  
+  
+### use median(>/<) as predictor: loneliness
+```{r}
+#data_clean$B4 <- as.numeric(data_clean$B4)
+# data_clean$Lonely2 <- factor(data_clean$Lonely2, levels = c("0", "1"), labels = c("Not lonely", "Lonely"))
+
+model_base <- glm(Lonely2 ~ AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+  
+model_green <- glm(Lonely2 ~ green_median + AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+
+model_developed <- glm(Lonely2 ~ open_space_median + AGE_centered + SEX + N3_numeric + B4,data = data_new, family = binomial)
+
+model_walkscore <- glm(Lonely2 ~ walkscore_median + AGE_centered + SEX + N3_numeric + B4,data = data_new, family = binomial)
+
+model_rec <- glm(Lonely2 ~ rec_median + AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+
+all_results <- bind_rows(
+  tidy(model_base, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Baseline"),
+  tidy(model_green, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Green Space"),
+  tidy(model_developed, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Open Space"),
+  tidy(model_walkscore, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Walkscore"),
+  tidy(model_rec, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Rec Facilities")
+)
+
+# Clean up the table
+results_table <- all_results %>%
+  select(model, term, estimate, conf.low, conf.high, p.value) %>%
+  mutate(
+    across(c(estimate, conf.low, conf.high), ~ round(., 3)),
+    p.value = round(p.value, 4),
+    significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    ),
+    # Format for easy reading
+    OR_95CI = paste0(estimate, " (", conf.low, "-", conf.high, ")", significance)
+  )
+
+# View the full table
+print(results_table, n = Inf)
+write.csv(results_table, "Loneliness_media.csv", row.names = FALSE)
+
+```
+
+green_highest
+openspace_highest
+walkscore_highest
+rec_facility_highest
+
+### use Q1-Q3 and Q4 for predictor: loneliness
+```{r}
+#data_clean$B4 <- as.numeric(data_clean$B4)
+# data_clean$Lonely2 <- factor(data_clean$Lonely2, levels = c("0", "1"), labels = c("Not lonely", "Lonely"))
+
+model_base <- glm(Lonely2 ~ AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+  
+model_green <- glm(Lonely2 ~ green_highest + AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+
+model_developed <- glm(Lonely2 ~ openspace_highest + AGE_centered + SEX + N3_numeric + B4,data = data_new, family = binomial)
+
+model_walkscore <- glm(Lonely2 ~ walkscore_highest + AGE_centered + SEX + N3_numeric + B4,data = data_new, family = binomial)
+
+model_rec <- glm(Lonely2 ~ rec_facility_highest + AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+
+all_results <- bind_rows(
+  tidy(model_base, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Baseline"),
+  tidy(model_green, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Green Space"),
+  tidy(model_developed, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Open Space"),
+  tidy(model_walkscore, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Walkscore"),
+  tidy(model_rec, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Rec Facilities")
+)
+
+# Clean up the table
+results_table <- all_results %>%
+  select(model, term, estimate, conf.low, conf.high, p.value) %>%
+  mutate(
+    across(c(estimate, conf.low, conf.high), ~ round(., 3)),
+    p.value = round(p.value, 4),
+    significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    ),
+    # Format for easy reading
+    OR_95CI = paste0(estimate, " (", conf.low, "-", conf.high, ")", significance)
+  )
+
+# View the full table
+print(results_table, n = Inf)
+write.csv(results_table, "Loneliness_highestQ.csv", row.names = FALSE)
+
+```
+
+### model fit-loneliness
+```{r}
+# For Loneliness example - repeat for each health outcome
+model_comparison <- data.frame(
+  Model = c("Baseline", "Green Space", "Open Space", "Walkscore", "Rec Facilities"),
+  AIC = c(AIC(model_base), AIC(model_green), AIC(model_developed), AIC(model_walkscore), AIC(model_rec)),
+  BIC = c(BIC(model_base), BIC(model_green), BIC(model_developed), BIC(model_walkscore), BIC(model_rec)),
+  Pseudo_R2 = 1 - c(deviance(model_base)/model_base$null.deviance,
+                   deviance(model_green)/model_green$null.deviance,
+                   deviance(model_developed)/model_developed$null.deviance,
+                   deviance(model_walkscore)/model_walkscore$null.deviance,
+                   deviance(model_rec)/model_rec$null.deviance)
+)
+
+print(model_comparison)
+```
+
+### Chronic Disease
+```{r}
+# model_green_new <- glm(Chronic_disease_cat ~ green_highest + AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+
+# summary(model_green_new)
+
+model_disease_base <- glm(Chronic_disease_cat ~ AGE_centered + factor(SEX) + N3_numeric + B4, data = data_new, family = binomial)
+  
+model_disease_green <- glm(Chronic_disease_cat ~ green_quartile + AGE_centered + factor(SEX) + N3_numeric + B4, data = data_new, family = binomial)
+
+model_disease_developed <- glm(Chronic_disease_cat ~ open_space_quartile + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+model_disease_walkscore <- glm(Chronic_disease_cat ~ walkscore_quartile + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+model_disease_rec <- glm(Chronic_disease_cat ~ rec_facility_count_quartile + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+all_results <- bind_rows(
+  tidy(model_disease_base, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Baseline"),
+  tidy(model_disease_green, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Green Space"),
+  tidy(model_disease_developed, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Open Space"),
+  tidy(model_disease_walkscore, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Walkscore"),
+  tidy(model_disease_rec, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Rec Facilities")
+)
+
+# Clean up the table
+results_table <- all_results %>%
+  select(model, term, estimate, conf.low, conf.high, p.value) %>%
+  mutate(
+    across(c(estimate, conf.low, conf.high), ~ round(., 3)),
+    p.value = round(p.value, 4),
+    significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    ),
+    # Format for easy reading
+    OR_95CI = paste0(estimate, " (", conf.low, "-", conf.high, ")", significance)
+  )
+
+# View the full table
+print(results_table, n = Inf)
+write.csv(results_table, "disease.csv", row.names = FALSE)
+
+```
+
+green_median
+open_space_median
+walkscore_median
+rec_median 
+
+### use median
+```{r}
+# model_green_new <- glm(Chronic_disease_cat ~ green_highest + AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+
+# summary(model_green_new)
+
+model_disease_base <- glm(Chronic_disease_cat ~ AGE_centered + factor(SEX) + N3_numeric + B4, data = data_new, family = binomial)
+  
+model_disease_green <- glm(Chronic_disease_cat ~ green_median + AGE_centered + factor(SEX) + N3_numeric + B4, data = data_new, family = binomial)
+
+model_disease_developed <- glm(Chronic_disease_cat ~ open_space_median + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+model_disease_walkscore <- glm(Chronic_disease_cat ~ walkscore_median + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+model_disease_rec <- glm(Chronic_disease_cat ~ rec_median + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+all_results <- bind_rows(
+  tidy(model_disease_base, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Baseline"),
+  tidy(model_disease_green, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Green Space"),
+  tidy(model_disease_developed, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Open Space"),
+  tidy(model_disease_walkscore, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Walkscore"),
+  tidy(model_disease_rec, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Rec Facilities")
+)
+
+# Clean up the table
+results_table <- all_results %>%
+  select(model, term, estimate, conf.low, conf.high, p.value) %>%
+  mutate(
+    across(c(estimate, conf.low, conf.high), ~ round(., 3)),
+    p.value = round(p.value, 4),
+    significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    ),
+    # Format for easy reading
+    OR_95CI = paste0(estimate, " (", conf.low, "-", conf.high, ")", significance)
+  )
+
+# View the full table
+print(results_table, n = Inf)
+write.csv(results_table, "disease_median.csv", row.names = FALSE)
+
+```
+
+### use Q1-Q3, Q4
+```{r}
+# model_green_new <- glm(Chronic_disease_cat ~ green_highest + AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+
+# summary(model_green_new)
+
+green_highest
+openspace_highest
+walkscore_highest
+rec_facility_highest
+
+model_disease_base <- glm(Chronic_disease_cat ~ AGE_centered + factor(SEX) + N3_numeric + B4, data = data_new, family = binomial)
+  
+model_disease_green <- glm(Chronic_disease_cat ~ green_highest + AGE_centered + factor(SEX) + N3_numeric + B4, data = data_new, family = binomial)
+
+model_disease_developed <- glm(Chronic_disease_cat ~ openspace_highest + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+model_disease_walkscore <- glm(Chronic_disease_cat ~ walkscore_highest + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+model_disease_rec <- glm(Chronic_disease_cat ~ rec_facility_highest + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+all_results <- bind_rows(
+  tidy(model_disease_base, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Baseline"),
+  tidy(model_disease_green, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Green Space"),
+  tidy(model_disease_developed, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Open Space"),
+  tidy(model_disease_walkscore, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Walkscore"),
+  tidy(model_disease_rec, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Rec Facilities")
+)
+
+# Clean up the table
+results_table <- all_results %>%
+  select(model, term, estimate, conf.low, conf.high, p.value) %>%
+  mutate(
+    across(c(estimate, conf.low, conf.high), ~ round(., 3)),
+    p.value = round(p.value, 4),
+    significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    ),
+    # Format for easy reading
+    OR_95CI = paste0(estimate, " (", conf.low, "-", conf.high, ")", significance)
+  )
+
+# View the full table
+print(results_table, n = Inf)
+write.csv(results_table, "disease_hightestQ.csv", row.names = FALSE)
+
+```
+
+### Disease-AUC
+```{r}
+pred_baseline <- predict(model_disease_base, type = "response")
+roc_obj_1 <- roc(data_disease$Chronic_disease_cat, pred_baseline)
+auc(roc_obj_1)
+
+
+pred_green <- predict(model_disease_green, type = "response")
+roc_obj_2 <- roc(data_disease$Chronic_disease_cat, pred_green)
+auc(roc_obj_2)
+
+pred_developed <- predict(model_disease_developed, type = "response")
+roc_obj_3 <- roc(data_disease$Chronic_disease_cat, pred_baseline)
+auc(roc_obj_3)
+
+pred_walkscore <- predict(model_disease_walkscore, type = "response")
+roc_obj_4 <- roc(data_disease$Chronic_disease_cat, pred_baseline)
+auc(roc_obj_4)
+
+pred_rec <- predict(model_disease_rec, type = "response")
+roc_obj_5 <- roc(data_disease$Chronic_disease_cat, pred_baseline)
+auc(roc_obj_5)
+
+pred_baseline <- predict(model_disease_base, type = "response")
+roc_obj <- roc(data_disease$Chronic_disease_cat, pred_baseline)
+auc(roc_obj)
+```
+```{r}
+vars_used <- c("Chronic_disease_cat", "AGE_centered", "SEX", "N3_numeric", "B4")
+
+# Subset only complete cases for those variables:
+data_disease <- data_new[complete.cases(data_new[, vars_used]), ]
+
+# Confirm the length matches your predictions
+length(data_disease$Chronic_disease_cat)  # Should now be 720
+length(pred_baseline)  
+
+roc_obj <- roc(data_disease$Chronic_disease_cat, pred_baseline)
+
+# Print AUC
+auc_value <- auc(roc_obj)
+print(auc_value)
+```
+
+
+### model fit-chronic disease
+```{r}
+library(pROC)
+# For Loneliness example - repeat for each health outcome
+model_comparison <- data.frame(
+  Model = c("Baseline", "Green Space", "Open Space", "Walkscore", "Rec Facilities"),
+  AIC = c(AIC(model_disease_base), AIC(model_disease_green), AIC(model_disease_developed), AIC(model_disease_walkscore), AIC(model_disease_rec)),
+  BIC = c(BIC(model_disease_base), BIC(model_disease_green), BIC(model_disease_developed), BIC(model_disease_walkscore), BIC(model_disease_rec)),
+  Pseudo_R2 = 1 - c(deviance(model_disease_base)/model_disease_base$null.deviance,
+                   deviance(model_disease_green)/model_disease_green$null.deviance,
+                   deviance(model_disease_developed)/model_disease_developed$null.deviance,
+                   deviance(model_disease_walkscore)/model_disease_walkscore$null.deviance,
+                   deviance(model_disease_rec)/model_disease_rec$null.deviance)
+)
+
+print(model_comparison)
+```
+
+green_median
+open_space_median
+walkscore_median
+rec_median 
+### Life satisfaction
+```{r}
+model_LifeSat_base <- glm(LifeSat ~ AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+  
+model_LifeSat_green <- glm(LifeSat ~ green_quartile + AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+
+model_LifeSat_developed <- glm(LifeSat ~ open_space_quartile + AGE_centered + SEX + N3_numeric + B4,data = data_new, family = binomial)
+
+model_LifeSat_walkscore <- glm(LifeSat ~ walkscore_quartile + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+model_LifeSat_rec <- glm(LifeSat ~ rec_facility_count_quartile + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+all_results <- bind_rows(
+  tidy(model_LifeSat_base, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Baseline"),
+  tidy(model_LifeSat_green, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Green Space"),
+  tidy(model_LifeSat_developed, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Open Space"),
+  tidy(model_LifeSat_walkscore, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Walkscore"),
+  tidy(model_LifeSat_rec, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Rec Facilities")
+)
+
+# Clean up the table
+results_table <- all_results %>%
+  select(model, term, estimate, conf.low, conf.high, p.value) %>%
+  mutate(
+    across(c(estimate, conf.low, conf.high), ~ round(., 3)),
+    p.value = round(p.value, 4),
+    significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    ),
+    # Format for easy reading
+    OR_95CI = paste0(estimate, " (", conf.low, "-", conf.high, ")", significance)
+  )
+
+# View the full table
+print(results_table, n = Inf)
+write.csv(results_table, "lifesat.csv", row.names = FALSE)
+
+```
+
+green_median
+open_space_median
+walkscore_median
+rec_median 
+
+green_highest
+openspace_highest
+walkscore_highest
+rec_facility_highest
+### use median
+```{r}
+model_LifeSat_base <- glm(LifeSat ~ AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+  
+model_LifeSat_green <- glm(LifeSat ~ green_median + AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+
+model_LifeSat_developed <- glm(LifeSat ~ open_space_median + AGE_centered + SEX + N3_numeric + B4,data = data_new, family = binomial)
+
+model_LifeSat_walkscore <- glm(LifeSat ~ walkscore_median + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+model_LifeSat_rec <- glm(LifeSat ~ rec_median  + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+all_results <- bind_rows(
+  tidy(model_LifeSat_base, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Baseline"),
+  tidy(model_LifeSat_green, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Green Space"),
+  tidy(model_LifeSat_developed, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Open Space"),
+  tidy(model_LifeSat_walkscore, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Walkscore"),
+  tidy(model_LifeSat_rec, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Rec Facilities")
+)
+
+# Clean up the table
+results_table <- all_results %>%
+  select(model, term, estimate, conf.low, conf.high, p.value) %>%
+  mutate(
+    across(c(estimate, conf.low, conf.high), ~ round(., 3)),
+    p.value = round(p.value, 4),
+    significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    ),
+    # Format for easy reading
+    OR_95CI = paste0(estimate, " (", conf.low, "-", conf.high, ")", significance)
+  )
+
+# View the full table
+print(results_table, n = Inf)
+write.csv(results_table, "lifesat_median.csv", row.names = FALSE)
+
+```
+
+green_highest
+openspace_highest
+walkscore_highest
+rec_facility_highest
+### use Q1-Q3, Q4
+```{r}
+model_LifeSat_base <- glm(LifeSat ~ AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+  
+model_LifeSat_green <- glm(LifeSat ~ green_highest + AGE_centered + SEX + N3_numeric + B4, data = data_new, family = binomial)
+
+model_LifeSat_developed <- glm(LifeSat ~ openspace_highest + AGE_centered + SEX + N3_numeric + B4,data = data_new, family = binomial)
+
+model_LifeSat_walkscore <- glm(LifeSat ~ walkscore_highest + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+model_LifeSat_rec <- glm(LifeSat ~ rec_facility_highest  + AGE_centered + factor(SEX) + N3_numeric + B4,data = data_new, family = binomial)
+
+all_results <- bind_rows(
+  tidy(model_LifeSat_base, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Baseline"),
+  tidy(model_LifeSat_green, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Green Space"),
+  tidy(model_LifeSat_developed, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Open Space"),
+  tidy(model_LifeSat_walkscore, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Walkscore"),
+  tidy(model_LifeSat_rec, conf.int = TRUE, exponentiate = TRUE) %>% mutate(model = "Rec Facilities")
+)
+
+# Clean up the table
+results_table <- all_results %>%
+  select(model, term, estimate, conf.low, conf.high, p.value) %>%
+  mutate(
+    across(c(estimate, conf.low, conf.high), ~ round(., 3)),
+    p.value = round(p.value, 4),
+    significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      TRUE ~ ""
+    ),
+    # Format for easy reading
+    OR_95CI = paste0(estimate, " (", conf.low, "-", conf.high, ")", significance)
+  )
+
+# View the full table
+print(results_table, n = Inf)
+write.csv(results_table, "lifesat_highestQ.csv", row.names = FALSE)
+
+```
+
+
+### model fit-Life satisfaction
+```{r}
+# For Loneliness example - repeat for each health outcome
+model_comparison <- data.frame(
+  Model = c("Baseline", "Green Space", "Open Space", "Walkscore", "Rec Facilities"),
+  AIC = c(AIC(model_LifeSat_base), AIC(model_LifeSat_green), AIC(model_LifeSat_developed), AIC(model_LifeSat_walkscore), AIC(model_LifeSat_rec)),
+  BIC = c(BIC(model_LifeSat_base), BIC(model_LifeSat_green), BIC(model_LifeSat_developed), BIC(model_LifeSat_walkscore), BIC(model_LifeSat_rec)),
+  Pseudo_R2 = 1 - c(deviance(model_LifeSat_base)/model_LifeSat_base$null.deviance,
+                   deviance(model_LifeSat_green)/model_LifeSat_green$null.deviance,
+                   deviance(model_LifeSat_developed)/model_LifeSat_developed$null.deviance,
+                   deviance(model_LifeSat_walkscore)/model_LifeSat_walkscore$null.deviance,
+                   deviance(model_LifeSat_rec)/model_LifeSat_rec$null.deviance)
+)
+
+print(model_comparison)
+```
+
+
+
+# Exploratory Anslysis (old
+### SRH and GoodHealth
+```{r}
+library(ggplot2)
+
+summary(data$SRH)
+table(data$SRH)
+hist(data$SRH, main = "Distribution of SRH", xlab = "SRH")
+# boxplot(data$SRH, main = "Boxplot of SRH")
+
+# a general healthy population 
+```
+
+```{r}
+table(data$GoodHealth)
+prop.table(table(data$GoodHealth))
+summary(data$GoodHealth)
+ggplot(data, aes(x = as.factor(GoodHealth))) +
+  geom_bar(fill = "dodgerblue") +
+  labs(x = "GoodHealth (0 = No, 1 = Yes)", y = "Count")
+```
+
+### LifeSat
+```{r}
+table(data$LifeSat)
+prop.table(table(data$LifeSat))
+var(as.numeric(as.character(data$LifeSat)), na.rm = TRUE)
+
+summary(as.numeric(as.character(data$LifeSat)))
+
+ggplot(data, aes(x = as.factor(LifeSat))) +
+  geom_bar(fill = "dodgerblue") +
+  labs(x = "LifeSat (0 = unsatistified, 1 = satisfied)", y = "Count")
+
+# more people less satisfied with their life 
+
+tab <- table(data$GoodHealth, data$LifeSat, useNA = "ifany")
+rownames(tab) <- c("Poor/Fair Health", "Good Health")
+colnames(tab) <- c("Unsatisfied", "Satisfied", "Missing")
+print(tab)
+# good health alone does not ensure life satisfaction 
+```
+
+### Loneliness
+
+```{r}
+table(data$Lonely2)
+prop.table(table(data$Lonely2))
+
+summary(as.numeric(as.character(data$Lonely2)))
+
+ggplot(data, aes(x = as.factor(Lonely2))) +
+  geom_bar(fill = "dodgerblue") +
+  labs(x = "Lonely2 (0 = not lonely, 1 = lonely)", y = "Count")
+
+tab <- table(data$GoodHealth, data$Lonely2, useNA = "ifany")
+rownames(tab) <- c("Poor/Fair Health", "Good Health")
+colnames(tab) <- c("Not Lonely", "Lonely")
+print(tab)
+
+table_2x2 <- table(data$LifeSat, data$Lonely2)
+
+# Calculate Phi coefficient
+phi <- function(tab) {
+  chi2 <- chisq.test(tab)$statistic
+  sqrt(chi2 / sum(tab))
+}
+
+phi(table_2x2)
+
+table_2x2 <- table(data$LifeSat, data$Lonely2)
+print(table_2x2)
+
+# Check proportions
+prop.table(table_2x2) * 100  # Percentages
+```
+
+### Serious Distress
+```{r}
+table(data$SeriousDistress)
+prop.table(table(data$SeriousDistress))
+
+summary(as.numeric(as.character(data$Lonely2)))
+
+ggplot(data, aes(x = as.factor(SeriousDistress))) +
+  geom_bar(fill = "dodgerblue") +
+  labs(x = "Serious Distress (0 = not Distressed, 1 = Distressed)", y = "Count")
+
+tab <- table(data$GoodHealth, data$SeriousDistress, useNA = "ifany")
+rownames(tab) <- c("Poor/Fair Health", "Good Health")
+colnames(tab) <- c("0", "1", "missing")
+print(tab)
+# people with poor/fair health are more likely to indicate serious distress
+
+
+tab <- table(data$LifeSat, data$SeriousDistress, useNA = "ifany")
+rownames(tab) <- c("No", "Yes", "missing")
+colnames(tab) <- c("0", "1", "missing")
+print(tab)
+```
+
+### BMI index
+
+```{r}
+
+table(data$BMI_cat)
+prop.table(table(data$BMI_cat))
+
+# summary(as.numeric(as.character(data$BMI_cat)))
+
+data$BMI_cat_ORD <- factor(data$BMI_cat, 
+                       levels = c("Underweight", "Normal weight", "Overweight", "Obese"),
+                       ordered = TRUE)
+
+ggplot(data, aes(x = BMI_cat_ORD)) +
+  geom_bar(fill = "dodgerblue") +
+  labs(x = "BMI Category", 
+       y = "Count",
+       title = "Distribution of BMI Categories") +
+  theme_minimal() +
+  geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5)
+
+```
+
+### Chronic Disease
+
+```{r}
+table(data$Chronic_disease_cat)
+prop.table(table(data$Chronic_disease_cat))
+
+data$Chronic_disease_cat_ORD <- factor(data$Chronic_disease_cat, 
+                       levels = c("zero", "one", "two or more"),
+                       ordered = TRUE)
+
+table(data$BMI_cat, data$Chronic_disease_cat_ORD)
+
+ggplot(data, aes(x = as.factor(Chronic_disease_cat_ORD))) +
+  geom_bar(fill = "dodgerblue") +
+  labs(x = "Number of Chronic Diseases", 
+       y = "Count") +
+  theme_minimal() +
+  geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5) +
+  scale_x_discrete(labels = c("0" = "None", 
+                              "1" = "One", 
+                              "2" = "Two or more"))
+```
+
+# Predictors
+
+### Walkscore
+
+```{r}
+library(gridExtra)
+
+summary(data$walkscore)
+summary(data$green_percentage)
+summary(data$open_space_percentage)
+summary(data$rec_facility_count_1mile)
+
+var(data$walkscore, na.rm = TRUE)
+var(data$green_percentage, na.rm = TRUE)
+var(data$open_space_percentage, na.rm = TRUE)
+var(data$rec_facility_count_1mile, na.rm = TRUE)
+
+boxplot(data$walkscore, main = "Walk Score")
+boxplot(data$green_percentage, main = "Green %")
+boxplot(data$open_space_percentage, main = "Open Space %")
+boxplot(data$rec_facility_count_1mile, main = "Rec Facilities")
+
+p1 <- ggplot(data, aes(x = walkscore)) +
+  geom_histogram(bins = 30, fill = "dodgerblue") +
+  labs(title = "Walk Score Distribution")
+
+p2 <- ggplot(data, aes(x = green_percentage)) +
+  geom_histogram(bins = 30, fill = "forestgreen") +
+  labs(title = "Green % Distribution")
+
+p3 <- ggplot(data, aes(x = open_space_percentage)) +
+  geom_histogram(bins = 30, fill = "lightblue") +
+  labs(title = "Open Space % Distribution")
+
+p4 <- ggplot(data, aes(x = rec_facility_count_1mile)) +
+  geom_histogram(bins = 30, fill = "coral") +
+  labs(title = "Rec Facilities Distribution")
+
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+```
+
+### Census tract-level
+```{r}
+summary(data$TRACT_GREENSPACE)
+summary(data$COUNT_TRI_FACILITIES.y)
+summary(data$COUNT_OPEN_PARKS)
+
+var(data$TRACT_GREENSPACE, na.rm = TRUE)
+var(data$COUNT_TRI_FACILITIES.y, na.rm = TRUE)
+var(data$COUNT_OPEN_PARKS, na.rm = TRUE)
+
+p5 <- ggplot(data, aes(x = TRACT_GREENSPACE)) +
+  geom_histogram(bins = 30, fill = "forestgreen") +
+  labs(title = "Census Tract Green % Distribution")
+
+p6 <- ggplot(data, aes(x = COUNT_TRI_FACILITIES.y)) +
+  geom_histogram(bins = 30, fill = "black") +
+  labs(title = "Census Tract Toxic Release Facilities Distribution")
+
+p7 <- ggplot(data, aes(x = COUNT_OPEN_PARKS)) +
+  geom_histogram(bins = 30, fill = "coral") +
+  labs(title = "Census Tract parks_data Distribution")
+
+grid.arrange(p5, p6, p7, ncol = 2)
+```
+
+```{r}
+cor_matrix <- cor(data[,c("walkscore", "green_percentage", 
+                          "open_space_percentage", "rec_facility_count_1mile")], 
+                  use = "complete.obs")
+print(round(cor_matrix, 2))
+```
+
+```{r}
+cor_matrix_2 <- cor(data[,c("TRACT_GREENSPACE", "COUNT_TRI_FACILITIES.y", 
+                          "COUNT_OPEN_PARKS")], 
+                  use = "complete.obs")
+print(round(cor_matrix_2, 2))
+
+```
+
+### Creating Composite Scores
+```{r}
+
+data <- read_excel("data_10.28.csv.xlsx") 
+
+# Get composite score including all six categories 
+data <- data %>%
+  mutate(
+    health_positive_score = 
+      (GoodHealth == 1) + 
+      (LifeSat == 1) + 
+      (Lonely2 == 0) +  #reversed 
+      (SeriousDistress == 0) +  #reversed
+      (BMI_cat %in% c("Normal weight")) +  
+      (Chronic_disease_cat == "zero"),  
+    
+    # Convert to 0-1 scale for interpretation
+    health_positive_prop = health_positive_score / 6
+  )
+
+# Get the percentage 
+data <- data %>%
+  mutate(
+    # For the proportion score (0-1 scale)
+    health_prop_category = case_when(
+      health_positive_prop >= 0.83 ~ "Excellent",      # 5-6 indicators
+      health_positive_prop >= 0.67 ~ "Very Good",      # 4   
+      health_positive_prop >= 0.50 ~ "Good",           # 3 
+      health_positive_prop >= 0.33 ~ "Fair",           # 2 
+      health_positive_prop >= 0.17 ~ "Poor",           # 1
+      health_positive_prop >= 0 ~ "Very Poor",         # 0
+      TRUE ~ NA_character_
+    ))
+```
+
+```{r}
+hist(data$AGE, breaks = 20, main = "Age Distribution", xlab = "Age", col = "skyblue")
+summary(data$AGE)
+
+```
+
+
+### Exploratory Analysis
+
+```{r}
+# Center Age
+data$AGE_centered <- scale(data$AGE, center = TRUE, scale = FALSE)
+
+# Age
+data <- data %>%
+  mutate(
+    age_group = case_when(
+      AGE < 25 ~ "18-24",
+      AGE >= 25 & AGE < 35 ~ "25-34",
+      AGE >= 35 & AGE < 45 ~ "35-44", 
+      AGE >= 45 & AGE < 55 ~ "45-54",
+      AGE >= 55 & AGE < 65 ~ "55-64",
+      AGE >= 65 ~ "65+",
+      TRUE ~ NA_character_
+    ) %>%
+      factor(levels = c("18-24", "25-34", "35-44", "45-54", "55-64", "65+"))
+  )
+
+# Sex
+data$Gender <- factor(data$SEX,
+                       levels = c(1, 2),
+                       labels = c("Male", "Female"))
+
+# Income
+data$income_category <- factor(data$income_category,
+                              levels = c("No Income", "Very Low (<$10K)", "Low ($10K-25K)", 
+                                         "Lower Middle ($25K-50K)", "Middle ($50K-100K)", 
+                                         "Upper Middle ($100K-200K)", "High ($200K+)"),
+                              ordered = TRUE)
+
+# EDU
+data <- data %>% 
+  mutate(
+    EDU = case_when(
+      B4 %in% c(1, 2, 3, 4, 5, 6) ~ "Bachelor's or less",   
+      B4 %in% c(7, 8, 9) ~ "Master's or more",       
+      TRUE ~ NA_character_                                      
+    ) %>% 
+      factor(levels = c("Bachelor's or less", "Master's or more"))
+  )
+
+# Table
+library(knitr)
+library(gt)
+library(janitor)
+library(purrr)
+
+# Create a function for clean tables
+create_clean_table <- function(var1, var2, data) {
+  data %>%
+    tabyl({{var1}}, {{var2}}) %>%
+    adorn_totals("row") %>%
+    adorn_percentages("col") %>%
+    adorn_pct_formatting(digits = 1) %>%
+    adorn_ns(position = "front") %>%
+    adorn_title()
+}
+
+# Generate all clean tables
+clean_tables <- list(
+  edu_by_state = create_clean_table(EDU, STATE, data),
+  income_by_edu = create_clean_table(income_category, EDU, data),
+  age_by_gender = create_clean_table(age_group, SEX, data),
+  edu_by_gender = create_clean_table(EDU, SEX, data)
+)
+
+# Print all tables
+walk(clean_tables, print)
+```
+
+```{r}
+state_health_table <- data %>%
+  count(STATE, health_positive_score) %>%
+  group_by(STATE) %>%
+  mutate(state_total = sum(n)) %>%
+  ungroup() %>%
+  dplyr::select(STATE, state_total, health_positive_score, n) %>%
+  pivot_wider(
+    names_from = health_positive_score,
+    values_from = n,
+    values_fill = 0
+  ) %>%
+  rename(N = state_total) %>%
+  # Order by state size (N) from largest to smallest
+  arrange(desc(N))
+
+# Ensure all score columns 1-6 are present
+for (score in 1:6) {
+  if (!as.character(score) %in% colnames(state_health_table)) {
+    state_health_table[[as.character(score)]] <- 0
+  }
+}
+
+# Select final columns in correct order
+final_table <- state_health_table %>%
+  dplyr::select(STATE, N, `1`, `2`, `3`, `4`, `5`, `6`)
+
+print(final_table, n = Inf)
+```
+
+### Ordinal Logistic Regression
+
+```{r}
+library(MASS)
+library(broom)
+
+summary(data$health_positive_score)
+hist(data$health_positive_score, main = "Distribution of Health Positive Score")
+
+str(data[, c("EDU", "Gender", "age_group", "income_category", "AGE")])
+table(data$Gender)
+
+model_centered <- polr(factor(SeriousDistress) ~ EDU + Gender + AGE_centered + income_category + green_percentage, data = data, Hess = TRUE)
+summary(model_centered)
+```
+
+### Model 1: Linear regression, demographics
+
+```{r}
+library(car)
+
+model_demographics <- lm(health_positive_score ~ EDU + Gender + AGE_centered + income_category, data = data)
+
+# Model summary
+summary(model_demographics)
+
+plot(model_demographics, which=1)
+plot(model_demographics, which=2)
+res <- residuals(model_demographics)
+hist(res, main = "residuals hist", xlab = "resids")
+```
+
+```{r}
+# income relationship plot
+plot_data <- data %>% group_by(income_category) %>% summarise(mean_health = mean(health_positive_score, na.rm = TRUE))
+
+# Plot it
+plot(plot_data$income_category, plot_data$mean_health, type = "b", lwd = 2, xlab = "Income Category", ylab = "Mean Health Score")
+
+```
+
+### Model 2: Linear regression, demographics, indicators
+
+```{r}
+data$green_percentage <- as.numeric(as.character(data$green_percentage))
+data$open_space_percentage <- as.numeric(as.character(data$open_space_percentage))
+data$walkscore <- as.numeric(as.character(data$walkscore))
+data$rec_facility_count_1mile <- as.numeric(as.character(data$rec_facility_count_1mile))
+
+
+model_2 <- lm(health_positive_score ~ EDU + Gender + AGE_centered + income_category +
+                green_percentage + open_space_percentage + walkscore + rec_facility_count_1mile, data = data)
+
+# Model summary
+summary(model_2)
+
+vif(model_2)
+
+model_3 <- lm(health_positive_score ~ EDU + Gender + AGE_centered + income_category +
+                COUNT_OPEN_PARKS, data = data)
+
+summary(model_3)
+```
+
+```{r}
+# multicollinearity
+
+cor(data[c("green_percentage", "open_space_percentage", "walkscore", "rec_facility_count_1mile")], use = "complete.obs")
+```
+
+```{r}
+healthy_unsatisfied <- data %>%
+  filter(GoodHealth == 1 & LifeSat == 0)
+
+# Check sample size
+nrow(healthy_unsatisfied)  # Should be ~265
+
+model_healthy <- glm(LifeSat ~ EDU + Gender + AGE_centered + income_category +
+                     green_percentage,
+                     data = data[data$GoodHealth == 1, ],  # ONLY healthy people
+                     family = binomial)
+
+
+
+summary(model_healthy)
+
+```
+
+
+
