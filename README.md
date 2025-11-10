@@ -1,4 +1,4 @@
-# MAPOR2025
+# MAPOR2025 
 For this year's Midwest Association of Public Opinion Research, I am examining the effects of neighborhood-level environmental factors on individual well-being. Three predictor variables I use are land cover, Walkscore, and recreational facility count. 
 
 I am interested in 1) the distibution of certain health conditions among the group, 2) examining the effects on environmental factors on the heal outcomes, 3) examining the differential effects brought by individual-level environment and census tract-level environment.
